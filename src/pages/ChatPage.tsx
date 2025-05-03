@@ -5,19 +5,19 @@ import ChatInput from '../components/chat/ChatInput';
 import storage from '../utils/storage';
 import chatService from '../utils/chat';
 import { ChatMessage as ChatMessageType, Conversation } from '../types';
-import { MessageCircle, Clock, PlusCircle } from 'lucide-react';
+import { MessageCircle, Clock, PlusCircle, Trash2 } from 'lucide-react';
 
 const ChatPage: React.FC = () => {
   const [conversations, setConversations] = React.useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = React.useState<Conversation | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
-  
+
   // Load conversations
   React.useEffect(() => {
     const loadedConversations = storage.getConversations();
     setConversations(loadedConversations);
-    
+
     // Create a new conversation if none exists
     if (loadedConversations.length === 0) {
       const newConversation = storage.createConversation('New Conversation');
@@ -28,28 +28,28 @@ const ChatPage: React.FC = () => {
       setActiveConversation(loadedConversations[loadedConversations.length - 1]);
     }
   }, []);
-  
+
   // Scroll to bottom when messages change
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeConversation?.messages]);
-  
+
   const handleSendMessage = async (message: string) => {
     if (!activeConversation) return;
-    
+
     setIsLoading(true);
-    
+
     try {
       const updatedConversation = await chatService.sendMessage(activeConversation.id, message);
-      
+
       if (updatedConversation) {
         // Update the conversations list
-        setConversations(prevConversations => 
-          prevConversations.map(convo => 
+        setConversations((prevConversations) =>
+          prevConversations.map((convo) =>
             convo.id === updatedConversation.id ? updatedConversation : convo
           )
         );
-        
+
         // Update the active conversation
         setActiveConversation(updatedConversation);
       }
@@ -59,20 +59,38 @@ const ChatPage: React.FC = () => {
       setIsLoading(false);
     }
   };
-  
+
   const handleNewConversation = () => {
     const newConversation = storage.createConversation();
     setConversations([...conversations, newConversation]);
     setActiveConversation(newConversation);
   };
-  
+
   const handleSelectConversation = (conversation: Conversation) => {
     setActiveConversation(conversation);
   };
-  
+
+  const handleClearChat = () => {
+    if (!activeConversation) return;
+
+    // Clear messages in the active conversation
+    const clearedConversation = { ...activeConversation, messages: [] };
+    setActiveConversation(clearedConversation);
+
+    // Update the conversations list
+    setConversations((prevConversations) =>
+      prevConversations.map((convo) =>
+        convo.id === clearedConversation.id ? clearedConversation : convo
+      )
+    );
+
+    // Persist the cleared conversation to storage
+    storage.updateConversation(clearedConversation);
+  };
+
   // Filter out system messages for display
   const getDisplayMessages = (messages: ChatMessageType[]) => {
-    return messages.filter(msg => msg.role !== 'system');
+    return messages.filter((msg) => msg.role !== 'system');
   };
 
   return (
@@ -88,7 +106,7 @@ const ChatPage: React.FC = () => {
             New Chat
           </button>
         </div>
-        
+
         <div className="overflow-y-auto">
           <AnimatePresence>
             {conversations.map((convo) => (
@@ -110,12 +128,10 @@ const ChatPage: React.FC = () => {
                     <MessageCircle size={16} className="text-gray-500" />
                     <span className="truncate font-medium">{convo.title}</span>
                   </div>
-                  
+
                   <div className="flex items-center gap-1 mt-1 text-xs text-gray-500">
                     <Clock size={12} />
-                    <span>
-                      {new Date(convo.updatedAt).toLocaleDateString()}
-                    </span>
+                    <span>{new Date(convo.updatedAt).toLocaleDateString()}</span>
                   </div>
                 </button>
               </motion.div>
@@ -123,7 +139,7 @@ const ChatPage: React.FC = () => {
           </AnimatePresence>
         </div>
       </div>
-      
+
       {/* Chat main area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Mobile conversation selector */}
@@ -131,7 +147,7 @@ const ChatPage: React.FC = () => {
           <select
             value={activeConversation?.id}
             onChange={(e) => {
-              const selectedConvo = conversations.find(c => c.id === e.target.value);
+              const selectedConvo = conversations.find((c) => c.id === e.target.value);
               if (selectedConvo) handleSelectConversation(selectedConvo);
             }}
             className="w-full p-2 border rounded"
@@ -142,7 +158,7 @@ const ChatPage: React.FC = () => {
               </option>
             ))}
           </select>
-          
+
           <button
             onClick={handleNewConversation}
             className="w-full mt-2 flex items-center justify-center gap-2 px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800 transition-colors"
@@ -151,13 +167,13 @@ const ChatPage: React.FC = () => {
             New Chat
           </button>
         </div>
-        
+
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
           {activeConversation && (
             <div>
               {getDisplayMessages(activeConversation.messages).length === 0 ? (
-                <motion.div 
+                <motion.div
                   className="flex flex-col items-center justify-center h-full py-20 text-center text-gray-500"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -181,10 +197,17 @@ const ChatPage: React.FC = () => {
             </div>
           )}
         </div>
-        
+
         {/* Input area */}
-        <div className="p-4 bg-white border-t">
+        <div className="p-4 bg-white border-t flex items-center justify-between">
           <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} />
+          <button
+            onClick={handleClearChat}
+            className="ml-4 flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors"
+          >
+            <Trash2 size={16} />
+            Clear Chat
+          </button>
         </div>
       </div>
     </div>
