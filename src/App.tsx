@@ -12,6 +12,7 @@ import MoodPage from './pages/MoodPage';
 import SettingsPage from './pages/SettingsPage';
 import ProfilePage from './pages/ProfilePage';
 import AboutPage from './pages/AboutPage';
+import AdminPage from './pages/AdminPage';
 
 // Services
 import storage from './utils/storage';
@@ -24,12 +25,17 @@ export const ThemeContext = React.createContext({
 
 function App() {
   const [isDarkMode, setIsDarkMode] = React.useState(false);
+  const [isAdmin, setIsAdmin] = React.useState(false);
 
   // Initialize storage and theme
   React.useEffect(() => {
     storage.initializeStorage();
     const savedTheme = localStorage.getItem('theme');
     setIsDarkMode(savedTheme === 'dark');
+    
+    // Check admin status
+    const profile = storage.getUserProfile();
+    setIsAdmin(profile.isAdmin || false);
   }, []);
 
   // Update theme
@@ -58,6 +64,7 @@ function App() {
             <Route path="settings" element={<SettingsPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="about" element={<AboutPage />} />
+            {isAdmin && <Route path="admin" element={<AdminPage />} />}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

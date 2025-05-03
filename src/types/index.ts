@@ -3,6 +3,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
+  flagged?: boolean;
+  flagReason?: string;
 }
 
 export interface Conversation {
@@ -11,6 +13,7 @@ export interface Conversation {
   messages: ChatMessage[];
   createdAt: number;
   updatedAt: number;
+  hasFlaggedContent?: boolean;
 }
 
 export interface JournalEntry {
@@ -21,6 +24,8 @@ export interface JournalEntry {
   tags: string[];
   createdAt: number;
   updatedAt: number;
+  flagged?: boolean;
+  flagReason?: string;
 }
 
 export type Mood = 'great' | 'good' | 'neutral' | 'bad' | 'awful';
@@ -39,6 +44,7 @@ export interface Quote {
 
 export interface UserProfile {
   name: string;
+  isAdmin?: boolean;
   mood: {
     current: Mood;
     history: MoodEntry[];
@@ -50,4 +56,15 @@ export interface UserProfile {
     notifications: boolean;
     fontSize: 'small' | 'medium' | 'large';
   };
+}
+
+export interface FlaggedContent {
+  id: string;
+  type: 'chat' | 'journal';
+  content: string;
+  reason: string;
+  timestamp: number;
+  reviewed?: boolean;
+  reviewedAt?: number;
+  reviewedBy?: string;
 }

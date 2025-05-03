@@ -1,8 +1,9 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { NavLink } from 'react-router-dom';
-import { MessageCircle, Book, BarChart, Settings, Brain } from 'lucide-react';
+import { MessageCircle, Book, BarChart, Settings, Brain, Shield } from 'lucide-react';
 import { getRandomQuote } from '../../utils/quotes';
+import storage from '../../utils/storage';
 
 interface SidebarProps {
   closeSidebar: () => void;
@@ -10,6 +11,12 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ closeSidebar }) => {
   const [quote, setQuote] = React.useState(getRandomQuote());
+  const [isAdmin, setIsAdmin] = React.useState(false);
+  
+  React.useEffect(() => {
+    const profile = storage.getUserProfile();
+    setIsAdmin(profile.isAdmin || false);
+  }, []);
   
   React.useEffect(() => {
     // Change quote every 2 minutes
@@ -26,6 +33,7 @@ const Sidebar: React.FC<SidebarProps> = ({ closeSidebar }) => {
     { to: '/journal', label: 'Journal', icon: <Book size={20} /> },
     { to: '/mood', label: 'Mood Tracker', icon: <BarChart size={20} /> },
     { to: '/settings', label: 'Settings', icon: <Settings size={20} /> },
+    ...(isAdmin ? [{ to: '/admin', label: 'Admin', icon: <Shield size={20} /> }] : []),
   ];
 
   const handleNavClick = () => {

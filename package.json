@@ -10,14 +10,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@react-spring/web": "^9.7.3",
+    "date-fns": "^2.30.0",
+    "framer-motion": "^11.0.5",
     "lucide-react": "^0.344.0",
+    "openai": "^4.97.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.21.0",
-    "framer-motion": "^11.0.5",
     "react-query": "^3.39.3",
-    "date-fns": "^2.30.0",
-    "@react-spring/web": "^9.7.3"
+    "react-router-dom": "^6.21.0",
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",
