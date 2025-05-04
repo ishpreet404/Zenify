@@ -112,7 +112,7 @@ This system is designed to identify and respond to potential suicide risks in re
    git clone https://github.com/your-org/ai-mental-health-support.git
    cd ai-mental-health-support
 
-##Screenshots
+## Screenshots
 ![Screenshot (93)](https://github.com/user-attachments/assets/55cffe50-f661-4573-b520-b2f82919459e)
 ![Screenshot (97)](https://github.com/user-attachments/assets/8a9b6c7a-45ca-4438-9c95-ce3680205a97)
 ![Screenshot (96)](https://github.com/user-attachments/assets/826efad9-a55c-4319-8aab-a3d2c334066b)
