@@ -10,7 +10,7 @@ const THERAPIST_SYSTEM_PROMPT =
 // Fetches a response from Gemini's API
 export const fetchGeminiResponse = async (messages: ChatMessage[]): Promise<string> => {
   try {
-    const apiKey = "AIzaSyAG4zSrJ-tt06NVMO3LxyjhPGqzYUXs7-k"; // <-- Replace with your Gemini API Key
+    const apiKey = "yaha api daldo"; // <-- Replace with your Gemini API Key
 
     if (!apiKey) {
       throw new Error('Gemini API key is missing.');

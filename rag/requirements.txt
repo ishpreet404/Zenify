@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pymupdf
+pillow
+pytesseract
+numpy
+hnswlib
+sentence-transformers
+ollama
+pydantic
