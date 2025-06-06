@@ -109,8 +109,8 @@ This system is designed to identify and respond to potential suicide risks in re
 
 1. **Clone the Repository**  
    ```bash
-   git clone https://github.com/your-org/ai-mental-health-support.git
-   cd ai-mental-health-support
+   git clone https://github.com/ishpreet404/Zenify.git
+   cd Zenify
 
 ## Screenshots
 ![Screenshot (93)](https://github.com/user-attachments/assets/55cffe50-f661-4573-b520-b2f82919459e)
