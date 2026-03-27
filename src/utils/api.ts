@@ -1,4 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const rawApiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '');
+
+const API_BASE_URL = rawApiBaseUrl || (import.meta.env.PROD ? '' : 'http://localhost:8000');
 
 export const getApiBaseUrl = (): string => API_BASE_URL;
 
@@ -19,6 +21,10 @@ interface ApiFetchOptions extends RequestInit {
 export const apiFetch = async (path: string, options: ApiFetchOptions = {}): Promise<Response> => {
   const { auth = false, headers, ...rest } = options;
 
+  if (!API_BASE_URL) {
+    throw new Error('VITE_API_BASE_URL is not configured in frontend environment variables');
+  }
+
   const requestHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(headers as Record<string, string>),
@@ -32,8 +38,12 @@ export const apiFetch = async (path: string, options: ApiFetchOptions = {}): Pro
     requestHeaders.Authorization = `Bearer ${token}`;
   }
 
-  return fetch(`${API_BASE_URL}${path}`, {
-    ...rest,
-    headers: requestHeaders,
-  });
+  try {
+    return await fetch(`${API_BASE_URL}${path}`, {
+      ...rest,
+      headers: requestHeaders,
+    });
+  } catch {
+    throw new Error(`Network error while contacting API at ${API_BASE_URL}`);
+  }
 };
