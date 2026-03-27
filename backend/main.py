@@ -35,6 +35,9 @@ OPENROUTER_API_KEY = (os.getenv('OPENROUTER_API_KEY') or '').strip()
 OPENROUTER_BASE_URL = (os.getenv('OPENROUTER_BASE_URL') or 'https://openrouter.ai/api/v1').rstrip('/')
 APP_BASE_URL = (os.getenv('APP_BASE_URL') or '').strip()
 APP_NAME = (os.getenv('APP_NAME') or 'Zenify').strip()
+SERVER_KEEPALIVE_ENABLED = (os.getenv('SERVER_KEEPALIVE_ENABLED', 'true').strip().lower() in {'1', 'true', 'yes', 'on'})
+SERVER_KEEPALIVE_INTERVAL_SECONDS = max(60, int(os.getenv('SERVER_KEEPALIVE_INTERVAL_SECONDS', 180)))
+SERVER_KEEPALIVE_TARGET_URL = (os.getenv('SERVER_KEEPALIVE_TARGET_URL') or '').strip()
 JWT_SECRET = os.getenv('JWT_SECRET', 'your-secret-key-change-in-production')
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./zenify.db')
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', 480))
@@ -365,6 +368,8 @@ class SimplifiedSuicideDetectionRAG:
 # Initialize RAG system at startup
 _rag_system: Optional[SimplifiedSuicideDetectionRAG] = None
 _rag_lock = threading.Lock()
+_keepalive_thread: Optional[threading.Thread] = None
+_keepalive_stop_event = threading.Event()
 
 def get_rag_system() -> SimplifiedSuicideDetectionRAG:
     global _rag_system
@@ -373,6 +378,50 @@ def get_rag_system() -> SimplifiedSuicideDetectionRAG:
             if _rag_system is None:
                 _rag_system = SimplifiedSuicideDetectionRAG()
     return _rag_system
+
+def get_keepalive_target_url() -> str:
+    if SERVER_KEEPALIVE_TARGET_URL:
+        return SERVER_KEEPALIVE_TARGET_URL
+
+    external_url = (os.getenv('RENDER_EXTERNAL_URL') or '').strip()
+    if external_url:
+        return f"{external_url.rstrip('/')}/health"
+
+    port = (os.getenv('PORT') or '8000').strip()
+    return f'http://127.0.0.1:{port}/health'
+
+def keepalive_worker(stop_event: threading.Event, target_url: str, interval_seconds: int) -> None:
+    while not stop_event.wait(interval_seconds):
+        try:
+            response = requests.get(target_url, timeout=10)
+            if response.status_code >= 400:
+                print(f"[keepalive] ping failed with status {response.status_code} for {target_url}")
+        except Exception as e:
+            print(f"[keepalive] ping error for {target_url}: {e}")
+
+@app.on_event('startup')
+def start_server_keepalive() -> None:
+    global _keepalive_thread
+    if not SERVER_KEEPALIVE_ENABLED:
+        return
+
+    if _keepalive_thread and _keepalive_thread.is_alive():
+        return
+
+    target_url = get_keepalive_target_url()
+    _keepalive_stop_event.clear()
+    _keepalive_thread = threading.Thread(
+        target=keepalive_worker,
+        args=(_keepalive_stop_event, target_url, SERVER_KEEPALIVE_INTERVAL_SECONDS),
+        daemon=True,
+        name='server-keepalive-worker',
+    )
+    _keepalive_thread.start()
+    print(f"[keepalive] started loop -> {target_url} every {SERVER_KEEPALIVE_INTERVAL_SECONDS}s")
+
+@app.on_event('shutdown')
+def stop_server_keepalive() -> None:
+    _keepalive_stop_event.set()
 
 # Helper functions
 def hash_password(password: str) -> str:

@@ -3,6 +3,8 @@ import { motion } from 'framer-motion';
 import { ChatMessage as ChatMessageType } from '../../types';
 import { formatDistanceToNow } from 'date-fns';
 import { Brain, User, AlertCircle, Heart } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -18,6 +20,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     message.content.includes('Call 988') ||
     message.content.includes('Crisis Text Line')
   );
+
+  const markdownClassName = isCrisisMessage
+    ? 'text-red-900'
+    : isUser
+      ? 'text-gray-900'
+      : 'text-white';
   
   return (
     <motion.div
@@ -57,7 +65,24 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
                 <span className="font-semibold text-sm">Crisis Support Resources</span>
               </div>
             )}
-            <p className="whitespace-pre-wrap">{message.content}</p>
+            <div className={`whitespace-pre-wrap break-words ${markdownClassName}`}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  h1: ({ children }) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
+                  h2: ({ children }) => <h2 className="text-base font-bold mb-2">{children}</h2>,
+                  h3: ({ children }) => <h3 className="text-sm font-bold mb-2">{children}</h3>,
+                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                  ul: ({ children }) => <ul className="list-disc pl-5 mb-2">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal pl-5 mb-2">{children}</ol>,
+                  li: ({ children }) => <li className="mb-1">{children}</li>,
+                  strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+                  code: ({ children }) => <code className="px-1 py-0.5 rounded bg-black/10 dark:bg-white/10 text-xs">{children}</code>,
+                }}
+              >
+                {message.content}
+              </ReactMarkdown>
+            </div>
           </div>
           
           <div className={`text-xs text-gray-500 mt-1 ${isUser ? 'text-right' : 'text-left'}`}>

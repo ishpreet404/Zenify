@@ -17,6 +17,7 @@ import AuthPage from './pages/AuthPage';
 
 // Services
 import storage from './utils/storage';
+import { getApiBaseUrl } from './utils/api';
 import { useAuth } from './context/AuthContext';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 
@@ -29,6 +30,8 @@ export const ThemeContext = React.createContext({
 function AppContent() {
   const [isDarkMode, setIsDarkMode] = React.useState(false);
   const { isAuthenticated, isAdmin, loading } = useAuth();
+  const keepAliveEnabled = (import.meta.env.VITE_ENABLE_KEEPALIVE || 'true').toLowerCase() === 'true';
+  const keepAliveIntervalMs = Number(import.meta.env.VITE_KEEPALIVE_INTERVAL_MS || 180000);
 
   // Initialize storage and theme
   React.useEffect(() => {
@@ -46,6 +49,31 @@ function AppContent() {
     }
     localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
   }, [isDarkMode]);
+
+  // Keep backend warm while users are active in the app
+  React.useEffect(() => {
+    if (!isAuthenticated || !keepAliveEnabled) {
+      return;
+    }
+
+    const apiBaseUrl = getApiBaseUrl();
+    if (!apiBaseUrl) {
+      return;
+    }
+
+    const ping = () => {
+      fetch(`${apiBaseUrl}/health`, {
+        method: 'GET',
+        cache: 'no-store',
+      }).catch(() => {
+        // ignore ping errors; this is best-effort keepalive
+      });
+    };
+
+    ping();
+    const intervalId = window.setInterval(ping, Math.max(60000, keepAliveIntervalMs));
+    return () => window.clearInterval(intervalId);
+  }, [isAuthenticated, keepAliveEnabled, keepAliveIntervalMs]);
 
   const toggleDarkMode = () => {
     setIsDarkMode(!isDarkMode);
