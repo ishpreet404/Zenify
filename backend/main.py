@@ -29,14 +29,16 @@ OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
 JWT_SECRET = os.getenv('JWT_SECRET', 'your-secret-key-change-in-production')
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./zenify.db')
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', 480))
-FRONTEND_ORIGINS = os.getenv('FRONTEND_ORIGINS', 'http://localhost:5173').split(',')
+FRONTEND_ORIGINS = [
+    origin.strip().rstrip('/')
+    for origin in os.getenv('FRONTEND_ORIGINS', 'http://localhost:5173').split(',')
+    if origin.strip()
+]
+FRONTEND_ORIGIN_REGEX = os.getenv('FRONTEND_ORIGIN_REGEX', r'https://.*\.vercel\.app')
 
 # Use psycopg driver for PostgreSQL connections (Render Python 3.14 compatible)
 if DATABASE_URL.startswith('postgresql://') and '+psycopg' not in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace('postgresql://', 'postgresql+psycopg://', 1)
-
-if not OPENROUTER_API_KEY:
-    raise ValueError('OPENROUTER_API_KEY environment variable is required')
 
 if len(JWT_SECRET) < 32:
     raise ValueError('JWT_SECRET must be at least 32 characters')
@@ -121,6 +123,7 @@ app = FastAPI(title='Zenify API', version='1.0.0')
 app.add_middleware(
     CORSMiddleware,
     allow_origins=FRONTEND_ORIGINS,
+    allow_origin_regex=FRONTEND_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
@@ -445,6 +448,12 @@ async def chat(request: Request, payload: ChatRequest, db: Session = Depends(get
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='User not found')
+
+    if not OPENROUTER_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail='OPENROUTER_API_KEY is not configured on the backend',
+        )
 
     try:
         response = requests.post(
