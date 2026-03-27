@@ -31,6 +31,10 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./zenify.db')
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', 480))
 FRONTEND_ORIGINS = os.getenv('FRONTEND_ORIGINS', 'http://localhost:5173').split(',')
 
+# Use psycopg driver for PostgreSQL connections (Render Python 3.14 compatible)
+if DATABASE_URL.startswith('postgresql://') and '+psycopg' not in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace('postgresql://', 'postgresql+psycopg://', 1)
+
 if not OPENROUTER_API_KEY:
     raise ValueError('OPENROUTER_API_KEY environment variable is required')
 
