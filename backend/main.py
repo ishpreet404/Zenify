@@ -3,6 +3,10 @@ from typing import Optional, List, Dict, Any
 import os
 from functools import lru_cache
 import json
+import base64
+import hashlib
+import hmac
+import secrets
 
 from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +14,6 @@ from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel, EmailStr
-from passlib.context import CryptContext
 from jwt import encode, decode, PyJWTError
 import requests
 from dotenv import load_dotenv
@@ -47,9 +50,6 @@ if len(JWT_SECRET) < 32:
 engine = create_engine(DATABASE_URL, connect_args={'check_same_thread': False} if 'sqlite' in DATABASE_URL else {})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
-
-# Password hashing
-pwd_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 
 # Database models
 class User(Base):
@@ -345,10 +345,26 @@ rag_system = SimplifiedSuicideDetectionRAG()
 
 # Helper functions
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    iterations = 600000
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, iterations)
+    salt_b64 = base64.urlsafe_b64encode(salt).decode('ascii')
+    digest_b64 = base64.urlsafe_b64encode(digest).decode('ascii')
+    return f'pbkdf2_sha256${iterations}${salt_b64}${digest_b64}'
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    try:
+        scheme, iter_str, salt_b64, digest_b64 = hashed.split('$', 3)
+        if scheme != 'pbkdf2_sha256':
+            return False
+
+        iterations = int(iter_str)
+        salt = base64.urlsafe_b64decode(salt_b64.encode('ascii'))
+        expected = base64.urlsafe_b64decode(digest_b64.encode('ascii'))
+        actual = hashlib.pbkdf2_hmac('sha256', plain.encode('utf-8'), salt, iterations)
+        return hmac.compare_digest(actual, expected)
+    except Exception:
+        return False
 
 def create_access_token(user_id: int, expires_delta: Optional[timedelta] = None) -> str:
     now = datetime.utcnow()
