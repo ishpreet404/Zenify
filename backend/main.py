@@ -7,6 +7,7 @@ import base64
 import hashlib
 import hmac
 import secrets
+import re
 
 from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,7 +39,15 @@ FRONTEND_ORIGINS = [
     for origin in os.getenv('FRONTEND_ORIGINS', 'http://localhost:5173').split(',')
     if origin.strip()
 ]
-FRONTEND_ORIGIN_REGEX = os.getenv('FRONTEND_ORIGIN_REGEX', r'https://.*\.vercel\.app')
+FRONTEND_ORIGIN_REGEX = os.getenv('FRONTEND_ORIGIN_REGEX', r'https://.*\.vercel\.app').strip()
+# Normalize common env escaping mistakes like https://.*\\.vercel\\.app
+FRONTEND_ORIGIN_REGEX = FRONTEND_ORIGIN_REGEX.replace('\\\\', '\\')
+if not FRONTEND_ORIGIN_REGEX:
+    FRONTEND_ORIGIN_REGEX = r'https://.*\.vercel\.app'
+try:
+    re.compile(FRONTEND_ORIGIN_REGEX)
+except re.error:
+    FRONTEND_ORIGIN_REGEX = r'https://.*\.vercel\.app'
 PASSWORD_HASH_ITERATIONS = int(os.getenv('PASSWORD_HASH_ITERATIONS', 210000))
 
 # Use psycopg driver for PostgreSQL connections (Render Python 3.14 compatible)
