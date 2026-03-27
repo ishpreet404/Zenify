@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { NavLink } from 'react-router-dom';
 import { MessageCircle, Book, BarChart, Settings, Brain, Shield } from 'lucide-react';
 import { getRandomQuote } from '../../utils/quotes';
-import storage from '../../utils/storage';
+import { useAuth } from '../../context/AuthContext';
 
 interface SidebarProps {
   closeSidebar: () => void;
@@ -11,12 +11,7 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ closeSidebar }) => {
   const [quote, setQuote] = React.useState(getRandomQuote());
-  const [isAdmin, setIsAdmin] = React.useState(false);
-  
-  React.useEffect(() => {
-    const profile = storage.getUserProfile();
-    setIsAdmin(profile.isAdmin || false);
-  }, []);
+  const { isAdmin } = useAuth();
   
   React.useEffect(() => {
     // Change quote every 2 minutes

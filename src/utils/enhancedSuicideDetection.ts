@@ -1,4 +1,5 @@
 import { checkContent } from './contentMonitor';
+import { getApiBaseUrl, apiFetch } from './api';
 
 // Enhanced RAG-based suicide detection with improved context awareness
 export interface SuicideRiskAnalysis {
@@ -174,11 +175,9 @@ class EnhancedSuicideDetector {
 
   private async callMCPClassifier(text: string): Promise<boolean> {
     try {
-      const response = await fetch('http://localhost:8002/analyze_suicide_risk', {
+      const response = await apiFetch('/analyze_suicide_risk', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        auth: true,
         body: JSON.stringify({ 
           text,
           conversation_id: 'current',

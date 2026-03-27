@@ -1,13 +1,10 @@
 // src/lib/githubModelsChat.ts
 import { ChatMessage, Conversation } from '../types';
 import storage from './storage';
-import ModelClient, { isUnexpected } from "@azure-rest/ai-inference";
-import { AzureKeyCredential } from "@azure/core-auth";
 import { enhancedCheckContent } from './enhancedSuicideDetection';
 import { adminDashboard } from './adminDashboard';
+import { apiFetch } from './api';
 
-const GITHUB_MODEL = import.meta.env.VITE_GITHUB_MODEL || "gpt-4o-mini"; // Available models: gpt-4o, gpt-4o-mini, o1-preview, o1-mini
-const GITHUB_ENDPOINT = "https://models.inference.ai.azure.com";
 
 const THERAPIST_SYSTEM_PROMPT =
   "You are Dr. Sarah, a compassionate and experienced licensed psychiatrist and therapist. Your role is to provide empathetic mental health support in a safe, non-judgmental environment. When starting a conversation, warmly introduce yourself and ask about the user's day or current feelings with questions like 'How has your day been treating you?' or 'What's on your mind today?' or 'How are you feeling right now?' Throughout the conversation, actively listen, validate their emotions, ask thoughtful follow-up questions, and offer gentle guidance when appropriate. Use a warm, professional tone that makes users feel heard and understood. Avoid making formal diagnoses or prescribing medication, and always encourage seeking help from qualified professionals for urgent concerns. Focus on creating a supportive space where users feel comfortable sharing their thoughts and emotions.";
@@ -81,51 +78,42 @@ export const initializeConversation = (conversationId: string): Conversation | n
   return updatedConvo;
 };
 
-// Fetches a response from GitHub Models API using Azure REST client
-export const fetchGitHubModelResponse = async (messages: ChatMessage[]): Promise<string> => {
+// Fetches a response from the backend API (which proxies to OpenRouter)
+export const fetchModelResponse = async (messages: ChatMessage[]): Promise<string> => {
   try {
-    const token = import.meta.env.VITE_GITHUB_API_TOKEN; // GitHub Personal Access Token
-
-    if (!token) {
-      throw new Error('GitHub API token is missing. Please set VITE_GITHUB_API_TOKEN in your environment variables.');
-    }
-
-    // Create the Azure REST client
-    const client = ModelClient(
-      GITHUB_ENDPOINT,
-      new AzureKeyCredential(token)
-    );
-
-    // Convert messages to the required format
     const apiMessages = messages.map(m => ({
       role: m.role,
       content: m.content,
     }));
 
-    const response = await client.path("/chat/completions").post({
-      body: {
+    const response = await apiFetch('/api/chat', {
+      method: 'POST',
+      auth: true,
+      body: JSON.stringify({
         messages: apiMessages,
-        temperature: 0.7,
-        top_p: 1.0,
-        max_tokens: 512,
-        model: GITHUB_MODEL
-      }
+        model: 'openai/gpt-4o-mini',
+      }),
     });
 
-    if (isUnexpected(response)) {
-      console.error('GitHub Models API error:', response.body.error);
-      throw new Error(`GitHub Models API error: ${response.body.error?.message || 'Unknown error'}`);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const message = typeof errorData?.detail === 'string' ? errorData.detail : 'Failed to get model response';
+      throw new Error(message);
     }
 
-    const responseText = response.body.choices?.[0]?.message?.content?.trim() ||
-      "Sorry, I couldn't generate a response.";
+    const data = await response.json();
+    const responseText = data.content?.trim() || "Sorry, I couldn't generate a response.";
     
     return responseText;
   } catch (error) {
-    console.error('GitHub Models API error:', error);
-    return "I'm sorry, I couldn't connect to the GitHub Models service. Please try again later.";
+    console.error('Model API error:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return `I'm sorry, I encountered an error: ${message}. Please try again.`;
   }
 };
+
+// Alias for backward compatibility
+export const fetchGitHubModelResponse = fetchModelResponse;
 
 
 // Add an optional contentType parameter to support both 'chat' and 'journal'

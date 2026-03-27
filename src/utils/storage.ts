@@ -157,11 +157,13 @@ export const getMoodEntries = (): MoodEntry[] => {
   return profile.mood.history;
 };
 
-export const addMoodEntry = (mood: Mood): MoodEntry => {
+export const addMoodEntry = (mood: Mood, note: string = ''): MoodEntry => {
   const profile = getUserProfile();
   const newEntry: MoodEntry = {
+    id: Math.random().toString(36).substr(2, 9),
     mood,
-    timestamp: Date.now(),
+    note,
+    date: Date.now(),
   };
   
   const updatedHistory = [...profile.mood.history, newEntry];

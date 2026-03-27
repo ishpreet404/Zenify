@@ -3,11 +3,12 @@ import { motion } from 'framer-motion';
 import storage from '../utils/storage';
 import { JournalEntry, MoodEntry } from '../types';
 import MoodChart from '../components/mood/MoodChart';
-import { Brain, Book, BarChart, MessageCircle } from 'lucide-react';
+import { Brain, Book, BarChart } from 'lucide-react';
 import { format } from 'date-fns';
+import { useAuth } from '../context/AuthContext';
 
 const ProfilePage: React.FC = () => {
-  const [profile, setProfile] = React.useState(storage.getUserProfile());
+  const { user } = useAuth();
   const [journals, setJournals] = React.useState<JournalEntry[]>([]);
   const [moodEntries, setMoodEntries] = React.useState<MoodEntry[]>([]);
   
@@ -22,12 +23,12 @@ const ProfilePage: React.FC = () => {
   const stats = React.useMemo(() => {
     return {
       journalCount: journals.length,
-      chatCount: profile.conversations.length,
+      chatCount: 0, // Would need backend to track this
       moodCount: moodEntries.length,
       streakCount: calculateStreak(moodEntries),
       averageMood: calculateAverageMood(moodEntries),
     };
-  }, [journals, profile.conversations, moodEntries]);
+  }, [journals, moodEntries]);
 
   // Helper functions for stats
   function calculateStreak(entries: MoodEntry[]): number {
@@ -124,7 +125,7 @@ const ProfilePage: React.FC = () => {
         </div>
         
         <h1 className="text-2xl font-semibold mb-2">
-          {profile.name ? `${profile.name}'s Profile` : 'Your Profile'}
+          {user?.full_name ? `${user.full_name}'s Profile` : 'Your Profile'}
         </h1>
         
         <p className="text-gray-600">

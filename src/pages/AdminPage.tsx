@@ -1,5 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { FlaggedContent } from '../types';
 import storage from '../utils/storage';
 import { format } from 'date-fns';
@@ -7,14 +9,29 @@ import { AlertTriangle, CheckCircle, MessageCircle, Book } from 'lucide-react';
 import Button from '../components/ui/Button';
 
 const AdminPage: React.FC = () => {
+  const navigate = useNavigate();
+  const { user, isAuthenticated } = useAuth();
   const [flaggedContent, setFlaggedContent] = React.useState<FlaggedContent[]>([]);
   const [filter, setFilter] = React.useState<'all' | 'pending' | 'reviewed'>('all');
   const [riskFilter, setRiskFilter] = React.useState<'all' | 'critical' | 'high' | 'medium' | 'low'>('all');
   
   React.useEffect(() => {
+    // Redirect to login if not authenticated
+    if (!isAuthenticated) {
+      navigate('/auth');
+      return;
+    }
+    
+    // Check if user is admin (can be set via user.role in backend or email check)
+    const isAdmin = user?.role === 'admin' || user?.is_admin === true;
+    if (!isAdmin) {
+      navigate('/');
+      return;
+    }
+    
     const content = storage.getFlaggedContent();
     setFlaggedContent(content);
-  }, []);
+  }, [isAuthenticated, user, navigate]);
   
   const handleMarkReviewed = (id: string) => {
     const profile = storage.getUserProfile();

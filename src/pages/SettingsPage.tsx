@@ -278,9 +278,9 @@ const SettingsPage: React.FC = () => {
         <div className="mt-4 flex items-start">
           <Info size={16} className="text-gray-500 mt-1 mr-2 flex-shrink-0" />
           <p className="text-xs text-gray-500">
-            Export your data regularly to avoid losing your journal entries and conversation history.
-            Note that we store all your data locally in your browser. Clearing your browser data will
-            remove all your Zenify information.
+            Your data is securely stored on our servers and tied to your account. Authentication
+            and AI access are handled server-side for security. You can export and import your data
+            for offline backup or migration purposes.
           </p>
         </div>
       </motion.div>

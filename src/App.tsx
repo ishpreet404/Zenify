@@ -13,9 +13,12 @@ import SettingsPage from './pages/SettingsPage';
 import ProfilePage from './pages/ProfilePage';
 import AboutPage from './pages/AboutPage';
 import AdminPage from './pages/AdminPage';
+import AuthPage from './pages/AuthPage';
 
 // Services
 import storage from './utils/storage';
+import { useAuth } from './context/AuthContext';
+import ProtectedRoute from './components/auth/ProtectedRoute';
 
 // Theme Context
 export const ThemeContext = React.createContext({
@@ -23,19 +26,15 @@ export const ThemeContext = React.createContext({
   toggleDarkMode: () => {},
 });
 
-function App() {
+function AppContent() {
   const [isDarkMode, setIsDarkMode] = React.useState(false);
-  const [isAdmin, setIsAdmin] = React.useState(false);
+  const { isAuthenticated, isAdmin, loading } = useAuth();
 
   // Initialize storage and theme
   React.useEffect(() => {
     storage.initializeStorage();
     const savedTheme = localStorage.getItem('theme');
     setIsDarkMode(savedTheme === 'dark');
-    
-    // Check admin status
-    const profile = storage.getUserProfile();
-    setIsAdmin(profile.isAdmin || false);
   }, []);
 
   // Update theme
@@ -52,11 +51,26 @@ function App() {
     setIsDarkMode(!isDarkMode);
   };
 
+  if (loading) {
+    return <div className="p-6 text-center text-gray-600">Loading...</div>;
+  }
+
   return (
     <ThemeContext.Provider value={{ isDarkMode, toggleDarkMode }}>
       <Router>
         <Routes>
-          <Route path="/" element={<Layout />}>
+          <Route path="/auth" element={<AuthPage />} />
+          
+          <Route
+            path="/"
+            element={
+              isAuthenticated ? (
+                <Layout />
+              ) : (
+                <Navigate to="/auth" replace />
+              )
+            }
+          >
             <Route index element={<HomePage />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="journal" element={<JournalPage />} />
@@ -73,4 +87,6 @@ function App() {
   );
 }
 
-export default App;
+export default function App() {
+  return <AppContent />;
+}

@@ -1,8 +1,9 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Link } from 'react-router-dom';
-import { Brain, Menu, Sun, Moon } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Brain, Menu, Sun, Moon, LogOut } from 'lucide-react';
 import { ThemeContext } from '../../App';
+import { useAuth } from '../../context/AuthContext';
 
 interface NavbarProps {
   toggleSidebar: () => void;
@@ -10,6 +11,13 @@ interface NavbarProps {
 
 const Navbar: React.FC<NavbarProps> = ({ toggleSidebar }) => {
   const { isDarkMode, toggleDarkMode } = React.useContext(ThemeContext);
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    navigate('/auth');
+  };
 
   return (
     <motion.nav 
@@ -70,9 +78,18 @@ const Navbar: React.FC<NavbarProps> = ({ toggleSidebar }) => {
                 to="/profile"
                 className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-black dark:bg-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
               >
-                Profile
+                {user?.full_name || 'Profile'}
               </Link>
             </motion.div>
+
+            <motion.button
+              onClick={handleLogout}
+              className="inline-flex items-center justify-center p-2 rounded-md text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              <LogOut size={20} />
+            </motion.button>
           </div>
         </div>
       </div>
