@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel, EmailStr
 from jwt import encode, decode, PyJWTError
 import requests
@@ -38,6 +39,7 @@ FRONTEND_ORIGINS = [
     if origin.strip()
 ]
 FRONTEND_ORIGIN_REGEX = os.getenv('FRONTEND_ORIGIN_REGEX', r'https://.*\.vercel\.app')
+PASSWORD_HASH_ITERATIONS = int(os.getenv('PASSWORD_HASH_ITERATIONS', 210000))
 
 # Use psycopg driver for PostgreSQL connections (Render Python 3.14 compatible)
 if DATABASE_URL.startswith('postgresql://') and '+psycopg' not in DATABASE_URL:
@@ -345,7 +347,7 @@ rag_system = SimplifiedSuicideDetectionRAG()
 
 # Helper functions
 def hash_password(password: str) -> str:
-    iterations = 600000
+    iterations = max(120000, PASSWORD_HASH_ITERATIONS)
     salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, iterations)
     salt_b64 = base64.urlsafe_b64encode(salt).decode('ascii')
@@ -402,24 +404,50 @@ def get_current_user(token: str, db: Session = Depends(get_db)) -> User:
 # Routes
 @app.post('/api/auth/register', response_model=AuthResponse)
 def register(payload: UserCreate, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.email == payload.email).first()
-    if existing:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Email already registered')
+    try:
+        existing = db.query(User).filter(User.email == payload.email).first()
+        if existing:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Email already registered')
 
-    user = User(
-        email=payload.email,
-        password_hash=hash_password(payload.password),
-        full_name=payload.full_name,
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+        user = User(
+            email=payload.email,
+            password_hash=hash_password(payload.password),
+            full_name=payload.full_name,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
 
-    token = create_access_token(user.id)
-    return AuthResponse(
-        access_token=token,
-        user=UserResponse.from_orm(user),
-    )
+        token = create_access_token(user.id)
+        return AuthResponse(
+            access_token=token,
+            user=UserResponse.from_orm(user),
+        )
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as e:
+        db.rollback()
+        error_text = str(e.orig).lower() if getattr(e, 'orig', None) else str(e).lower()
+
+        if 'username' in error_text and 'null' in error_text:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail='Database schema mismatch: users.username is required but backend does not use it. Recreate users table with latest schema.',
+            )
+        if 'email' in error_text and ('unique' in error_text or 'duplicate' in error_text):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Email already registered')
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail='Database constraint error while creating account',
+        )
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail='Failed to create account',
+        )
 
 @app.post('/api/auth/login', response_model=AuthResponse)
 def login(payload: UserLogin, db: Session = Depends(get_db)):

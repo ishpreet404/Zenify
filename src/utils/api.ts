@@ -1,6 +1,7 @@
 const rawApiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '');
 
 const API_BASE_URL = rawApiBaseUrl || (import.meta.env.PROD ? '' : 'http://localhost:8000');
+const API_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 20000);
 
 export const getApiBaseUrl = (): string => API_BASE_URL;
 
@@ -38,12 +39,22 @@ export const apiFetch = async (path: string, options: ApiFetchOptions = {}): Pro
     requestHeaders.Authorization = `Bearer ${token}`;
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
   try {
-    return await fetch(`${API_BASE_URL}${path}`, {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
       ...rest,
       headers: requestHeaders,
+      signal: controller.signal,
     });
-  } catch {
+    return response;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error(`Request timed out after ${API_TIMEOUT_MS}ms while contacting API at ${API_BASE_URL}`);
+    }
     throw new Error(`Network error while contacting API at ${API_BASE_URL}`);
+  } finally {
+    clearTimeout(timeoutId);
   }
 };
