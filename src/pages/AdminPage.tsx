@@ -22,8 +22,8 @@ const AdminPage: React.FC = () => {
       return;
     }
     
-    // Check if user is admin (can be set via user.role in backend or email check)
-    const isAdmin = user?.role === 'admin' || user?.is_admin === true;
+    // Check if user is admin
+    const isAdmin = user?.is_admin === true;
     if (!isAdmin) {
       navigate('/');
       return;

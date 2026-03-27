@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import secrets
 import re
+import threading
 
 from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,10 +31,15 @@ except ImportError:
 load_dotenv()
 
 # Configuration
-OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
+OPENROUTER_API_KEY = (os.getenv('OPENROUTER_API_KEY') or '').strip()
+OPENROUTER_BASE_URL = (os.getenv('OPENROUTER_BASE_URL') or 'https://openrouter.ai/api/v1').rstrip('/')
+APP_BASE_URL = (os.getenv('APP_BASE_URL') or '').strip()
+APP_NAME = (os.getenv('APP_NAME') or 'Zenify').strip()
 JWT_SECRET = os.getenv('JWT_SECRET', 'your-secret-key-change-in-production')
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./zenify.db')
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', 480))
+DEFAULT_CHAT_MODEL = os.getenv('DEFAULT_CHAT_MODEL', 'openai/gpt-4o-mini')
+OPENROUTER_ENABLE_REASONING = os.getenv('OPENROUTER_ENABLE_REASONING', 'true').strip().lower() in {'1', 'true', 'yes', 'on'}
 FRONTEND_ORIGINS = [
     origin.strip().rstrip('/')
     for origin in os.getenv('FRONTEND_ORIGINS', 'http://localhost:5173').split(',')
@@ -49,6 +55,11 @@ try:
 except re.error:
     FRONTEND_ORIGIN_REGEX = r'https://.*\.vercel\.app'
 PASSWORD_HASH_ITERATIONS = int(os.getenv('PASSWORD_HASH_ITERATIONS', 210000))
+ADMIN_EMAILS = {
+    email.strip().lower()
+    for email in os.getenv('ADMIN_EMAILS', '').split(',')
+    if email.strip()
+}
 
 # Use psycopg driver for PostgreSQL connections (Render Python 3.14 compatible)
 if DATABASE_URL.startswith('postgresql://') and '+psycopg' not in DATABASE_URL:
@@ -104,7 +115,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
-    model: str = 'openai/gpt-4o-mini'
+    model: str = DEFAULT_CHAT_MODEL
 
 class ChatResponse(BaseModel):
     content: str
@@ -352,7 +363,16 @@ class SimplifiedSuicideDetectionRAG:
         )
 
 # Initialize RAG system at startup
-rag_system = SimplifiedSuicideDetectionRAG()
+_rag_system: Optional[SimplifiedSuicideDetectionRAG] = None
+_rag_lock = threading.Lock()
+
+def get_rag_system() -> SimplifiedSuicideDetectionRAG:
+    global _rag_system
+    if _rag_system is None:
+        with _rag_lock:
+            if _rag_system is None:
+                _rag_system = SimplifiedSuicideDetectionRAG()
+    return _rag_system
 
 # Helper functions
 def hash_password(password: str) -> str:
@@ -395,6 +415,17 @@ def verify_access_token(token: str) -> int:
             headers={'WWW-Authenticate': 'Bearer'},
         )
 
+def is_admin_email(email: str) -> bool:
+    return email.strip().lower() in ADMIN_EMAILS
+
+def user_to_response(user: User) -> UserResponse:
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        is_admin=bool(user.is_admin or is_admin_email(user.email)),
+    )
+
 def get_db():
     db = SessionLocal()
     try:
@@ -422,6 +453,7 @@ def register(payload: UserCreate, db: Session = Depends(get_db)):
             email=payload.email,
             password_hash=hash_password(payload.password),
             full_name=payload.full_name,
+            is_admin=is_admin_email(payload.email),
         )
         db.add(user)
         db.commit()
@@ -430,7 +462,7 @@ def register(payload: UserCreate, db: Session = Depends(get_db)):
         token = create_access_token(user.id)
         return AuthResponse(
             access_token=token,
-            user=UserResponse.from_orm(user),
+            user=user_to_response(user),
         )
     except HTTPException:
         db.rollback()
@@ -464,10 +496,17 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid credentials')
 
+    # Keep DB role in sync with ADMIN_EMAILS configuration
+    if is_admin_email(user.email) and not user.is_admin:
+        user.is_admin = True
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
     token = create_access_token(user.id)
     return AuthResponse(
         access_token=token,
-        user=UserResponse.from_orm(user),
+        user=user_to_response(user),
     )
 
 @app.get('/api/auth/me', response_model=UserResponse)
@@ -484,8 +523,8 @@ async def get_me(request: Request, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='User not found')
-    
-    return UserResponse.from_orm(user)
+
+    return user_to_response(user)
 
 @app.post('/api/chat', response_model=ChatResponse)
 async def chat(request: Request, payload: ChatRequest, db: Session = Depends(get_db)):
@@ -509,23 +548,48 @@ async def chat(request: Request, payload: ChatRequest, db: Session = Depends(get
         )
 
     try:
+        request_headers = {
+            'Authorization': f'Bearer {OPENROUTER_API_KEY}',
+            'Content-Type': 'application/json',
+        }
+        if APP_BASE_URL:
+            request_headers['HTTP-Referer'] = APP_BASE_URL
+        if APP_NAME:
+            request_headers['X-Title'] = APP_NAME
+
+        requested_model = (payload.model or '').strip() or DEFAULT_CHAT_MODEL
+        request_body = {
+            'model': requested_model,
+            'messages': [m.dict() for m in payload.messages],
+        }
+        if OPENROUTER_ENABLE_REASONING:
+            request_body['reasoning'] = {'enabled': True}
+
         response = requests.post(
-            'https://openrouter.io/api/v1/chat/completions',
-            headers={
-                'Authorization': f'Bearer {OPENROUTER_API_KEY}',
-                'Content-Type': 'application/json',
-            },
-            json={
-                'model': payload.model,
-                'messages': [m.dict() for m in payload.messages],
-            },
+            f'{OPENROUTER_BASE_URL}/chat/completions',
+            headers=request_headers,
+            json=request_body,
             timeout=30,
         )
 
         if response.status_code != 200:
+            error_detail = ''
+            try:
+                response_json = response.json()
+                error_detail = (
+                    response_json.get('error', {}).get('message')
+                    or response_json.get('message')
+                    or ''
+                )
+            except ValueError:
+                error_detail = (response.text or '').strip()
+
+            if not error_detail:
+                error_detail = f'OpenRouter returned HTTP {response.status_code}'
+
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f'LLM API error: {response.text}',
+                detail=f'LLM API error: {error_detail}',
             )
 
         data = response.json()
@@ -556,6 +620,7 @@ async def analyze_suicide_risk(payload: SuicideAnalysisRequest, request: Request
 
     try:
         # Perform risk analysis
+        rag_system = get_rag_system()
         result = rag_system.analyze_suicide_risk(payload)
         
         # Log high-risk cases
@@ -581,13 +646,17 @@ async def analyze_suicide_risk(payload: SuicideAnalysisRequest, request: Request
 
 @app.get('/health')
 def health_check():
+    rag_loaded = _rag_system is not None
+    ml_models_loaded = bool(_rag_system and _rag_system.mcp_model is not None)
+    patterns_loaded = bool(_rag_system and len(_rag_system.direct_patterns) > 0)
+
     return {
         'status': 'ok',
         'database': 'connected',
         'rag_system': {
-            'loaded': True,
-            'ml_models': rag_system.mcp_model is not None,
-            'patterns': len(rag_system.direct_patterns) > 0
+            'loaded': rag_loaded,
+            'ml_models': ml_models_loaded,
+            'patterns': patterns_loaded
         }
     }
 
