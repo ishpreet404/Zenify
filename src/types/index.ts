@@ -68,4 +68,6 @@ export interface FlaggedContent {
   reviewed?: boolean;
   reviewedAt?: number;
   reviewedBy?: string;
+  userId?: string;
+  userEmail?: string;
 }

@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { FlaggedContent } from '../types';
-import storage from '../utils/storage';
+import { getFlaggedEvents, markFlaggedEventReviewed } from '../utils/adminApi';
 import { format } from 'date-fns';
 import { AlertTriangle, CheckCircle, MessageCircle, Book } from 'lucide-react';
 import Button from '../components/ui/Button';
@@ -12,6 +12,8 @@ const AdminPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, isAuthenticated } = useAuth();
   const [flaggedContent, setFlaggedContent] = React.useState<FlaggedContent[]>([]);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [filter, setFilter] = React.useState<'all' | 'pending' | 'reviewed'>('all');
   const [riskFilter, setRiskFilter] = React.useState<'all' | 'critical' | 'high' | 'medium' | 'low'>('all');
   
@@ -29,22 +31,32 @@ const AdminPage: React.FC = () => {
       return;
     }
     
-    const content = storage.getFlaggedContent();
-    setFlaggedContent(content);
+    const loadAlerts = async () => {
+      setIsLoading(true);
+      setLoadError(null);
+      try {
+        const content = await getFlaggedEvents();
+        setFlaggedContent(content);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to load flagged content';
+        setLoadError(message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    void loadAlerts();
   }, [isAuthenticated, user, navigate]);
   
-  const handleMarkReviewed = (id: string) => {
-    const profile = storage.getUserProfile();
-    const updated = storage.updateFlaggedContent(id, {
-      reviewed: true,
-      reviewedAt: Date.now(),
-      reviewedBy: profile.name || 'Admin',
-    });
-    
-    if (updated) {
+  const handleMarkReviewed = async (id: string) => {
+    try {
+      const updated = await markFlaggedEventReviewed(id, user?.email || user?.full_name || 'Admin');
       setFlaggedContent(prev => 
         prev.map(item => item.id === id ? updated : item)
       );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update alert';
+      setLoadError(message);
     }
   };
   
@@ -68,6 +80,12 @@ const AdminPage: React.FC = () => {
         <h1 className="text-2xl font-semibold">Admin Dashboard</h1>
         <p className="text-gray-600">Monitor and review flagged content</p>
       </div>
+
+      {loadError && (
+        <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {loadError}
+        </div>
+      )}
       
       {/* Filter buttons */}
       <div className="mb-6 flex flex-wrap gap-2">
@@ -96,7 +114,11 @@ const AdminPage: React.FC = () => {
       
       {/* Content list */}
       <div className="space-y-4">
-        {filteredContent.length === 0 ? (
+        {isLoading ? (
+          <div className="text-center py-12 bg-white rounded-lg shadow-sm">
+            <p className="text-gray-500">Loading flagged content...</p>
+          </div>
+        ) : filteredContent.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-lg shadow-sm">
             <AlertTriangle size={32} className="mx-auto mb-4 text-gray-400" />
             <p className="text-gray-500">No flagged content found</p>

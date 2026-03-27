@@ -86,6 +86,22 @@ class User(Base):
     is_admin = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
+class FlaggedEvent(Base):
+    __tablename__ = 'flagged_events'
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    user_email = Column(String, nullable=False)
+    conversation_id = Column(String, nullable=True, index=True)
+    content_type = Column(String, nullable=False, default='chat')
+    content = Column(String, nullable=False)
+    reason = Column(String, nullable=False)
+    risk_level = Column(String, nullable=False, index=True)
+    reviewed = Column(Boolean, default=False)
+    reviewed_at = Column(DateTime, nullable=True)
+    reviewed_by = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
 Base.metadata.create_all(bind=engine)
 
 # Pydantic models
@@ -141,6 +157,33 @@ class RiskAnalysisResponse(BaseModel):
     flagged: bool
     knowledge_base_matches: List[str]
 
+
+class FlaggedEventCreate(BaseModel):
+    conversation_id: Optional[str] = None
+    type: str = 'chat'
+    content: str
+    reason: str
+    risk_level: str
+
+
+class FlaggedEventReview(BaseModel):
+    reviewed: bool = True
+    reviewed_by: Optional[str] = None
+
+
+class FlaggedEventResponse(BaseModel):
+    id: str
+    type: str
+    content: str
+    reason: str
+    riskLevel: str
+    timestamp: int
+    reviewed: bool
+    reviewedAt: Optional[int] = None
+    reviewedBy: Optional[str] = None
+    userId: Optional[str] = None
+    userEmail: Optional[str] = None
+
 # FastAPI app
 app = FastAPI(title='Zenify API', version='1.0.0')
 
@@ -190,25 +233,35 @@ class SimplifiedSuicideDetectionRAG:
         self.direct_patterns = [
             'i want to kill myself', 'i am going to kill myself', 'i plan to end my life',
             'i am going to commit suicide', 'i have decided to die', 'i will take my own life',
-            'tonight is my last night', 'i have a plan to', 'i already have the', 'i know how i will'
+            'tonight is my last night', 'i have a plan to', 'i already have the', 'i know how i will',
+            'i want to die', 'i should be dead', 'i am done with life', 'i am ending it all'
         ]
         
         self.indirect_patterns = [
             'i can\'t go on anymore', 'there\'s no point in living', 'everyone would be better without me',
             'i feel like giving up', 'life is too hard', 'i don\'t see a way out',
             'i feel trapped', 'nothing will ever get better', 'i am a burden to everyone',
-            'i just want the pain to stop', 'hopeless', 'worthless', 'empty', 'numb'
+            'i just want the pain to stop', 'hopeless', 'worthless', 'empty', 'numb',
+            'i am tired of being here', 'i wish i could disappear', 'no reason to wake up'
         ]
         
         self.method_patterns = [
             'pills', 'rope', 'bridge', 'gun', 'knife', 'overdose',
-            'hanging', 'jumping', 'drowning', 'cutting', 'poison'
+            'hanging', 'jumping', 'drowning', 'cutting', 'poison',
+            'carbon monoxide', 'razor', 'train tracks'
         ]
         
         self.temporal_patterns = [
             'tonight is my last', 'today i will end', 'tomorrow i plan to', 'this weekend i will',
             'when i get home tonight', 'after this conversation', 'in the morning i will',
-            'by tonight', 'before tomorrow', 'very soon i will'
+            'by tonight', 'before tomorrow', 'very soon i will',
+            'right now', 'goodbye everyone', 'final message'
+        ]
+
+        self.protective_patterns = [
+            'i am safe', 'i am not suicidal', 'i do not want to die', 'i don\'t want to kill myself',
+            'i reached out for help', 'i called 988', 'my family needs me', 'i want to get better',
+            'i have a therapist', 'i have support', 'i will not hurt myself', 'i have no plan'
         ]
     
     def mcp_classify(self, text: str) -> tuple[bool, float]:
@@ -229,7 +282,7 @@ class SimplifiedSuicideDetectionRAG:
     def analyze_patterns(self, text: str) -> tuple[int, List[str]]:
         """Analyze text for suicide risk patterns"""
         text_lower = text.lower()
-        risk_score = 0
+        risk_score: float = 0
         risk_factors = []
         
         for pattern in self.direct_patterns:
@@ -252,7 +305,26 @@ class SimplifiedSuicideDetectionRAG:
                 risk_score += 7
                 risk_factors.append(f"Temporal indicator: {pattern}")
         
-        return risk_score, risk_factors
+        return int(risk_score), risk_factors
+
+    def analyze_protective_signals(self, text: str) -> tuple[int, List[str]]:
+        """Detect statements indicating safety intent or active help-seeking"""
+        text_lower = text.lower()
+        protective_score = 0
+        protective_cues: List[str] = []
+
+        for pattern in self.protective_patterns:
+            if pattern in text_lower:
+                protective_score += 3
+                protective_cues.append(f"Protective factor: {pattern}")
+
+        # Extra boost when user explicitly asks for support/help
+        for cue in ['can you help me', 'i need help', 'i need support', 'i want help']:
+            if cue in text_lower:
+                protective_score += 2
+                protective_cues.append(f"Help-seeking cue: {cue}")
+
+        return protective_score, protective_cues
     
     def analyze_context(self, messages: List[Dict[str, Any]]) -> tuple[int, List[str]]:
         """Analyze conversation context for risk escalation"""
@@ -280,13 +352,18 @@ class SimplifiedSuicideDetectionRAG:
         
         return context_score, contextual_cues
     
-    def determine_risk_level(self, pattern_score: int, context_score: int, 
-                           mcp_positive: bool, mcp_confidence: float) -> str:
+    def determine_risk_level(self, pattern_score: int, context_score: int,
+                           mcp_positive: bool, mcp_confidence: float,
+                           protective_score: int, imminent_intent: bool) -> str:
         """Determine overall risk level with ML safeguard"""
-        total_score = pattern_score + context_score
+        total_score = pattern_score + context_score - min(protective_score, 8)
+        total_score = max(total_score, 0)
         
         if mcp_positive and (pattern_score > 0 or context_score > 0):
             total_score += mcp_confidence * 8
+
+        if imminent_intent and (pattern_score >= 10 or mcp_positive):
+            return "critical"
         
         if mcp_positive and (pattern_score >= 10 or total_score >= 20 or 
                            (pattern_score > 0 and mcp_confidence > 0.95)):
@@ -300,15 +377,38 @@ class SimplifiedSuicideDetectionRAG:
         else:
             return "low"
     
-    def get_recommended_action(self, risk_level: str) -> str:
+    def get_recommended_action(self, risk_level: str, confidence: float,
+                               risk_factors: List[str], contextual_cues: List[str]) -> str:
         """Get recommended intervention action"""
-        actions = {
-            "critical": "IMMEDIATE EMERGENCY INTERVENTION: Contact 911 or crisis hotline (988) immediately. Do not leave person alone.",
-            "high": "URGENT PROFESSIONAL INTERVENTION: Contact mental health crisis team. Implement safety planning.",
-            "medium": "PROFESSIONAL CONSULTATION: Schedule mental health assessment within 24-48 hours.",
-            "low": "SUPPORTIVE MONITORING: Continue therapeutic conversation. Provide resources if appropriate."
-        }
-        return actions.get(risk_level, "Continue monitoring")
+        top_signals = ', '.join((risk_factors + contextual_cues)[:3]) or 'No strong indicators detected'
+
+        if risk_level == 'critical':
+            return (
+                "1) Stay with the person and keep them talking. "
+                "2) Contact emergency support now: call 988 (US) or local emergency services. "
+                "3) Remove immediate means of self-harm if possible. "
+                f"4) Escalate to human reviewer immediately. Confidence: {confidence:.2f}. "
+                f"Key signals: {top_signals}."
+            )
+        if risk_level == 'high':
+            return (
+                "1) Encourage immediate connection to a trusted person and crisis support (988/text HOME to 741741). "
+                "2) Complete a short safety plan (safe place, support contact, coping step). "
+                f"3) Trigger priority human follow-up today. Confidence: {confidence:.2f}. "
+                f"Key signals: {top_signals}."
+            )
+        if risk_level == 'medium':
+            return (
+                "1) Continue supportive conversation and assess intent/plan/means gently. "
+                "2) Share non-urgent mental health resources and suggest professional follow-up in 24-48h. "
+                f"3) Monitor for escalation. Confidence: {confidence:.2f}. "
+                f"Key signals: {top_signals}."
+            )
+
+        return (
+            "Supportive monitoring: validate feelings, encourage healthy coping, and provide resources if needed. "
+            f"Confidence: {confidence:.2f}."
+        )
     
     def get_knowledge_matches(self, risk_level: str) -> List[str]:
         """Get relevant knowledge base information"""
@@ -316,18 +416,21 @@ class SimplifiedSuicideDetectionRAG:
             return [
                 "Crisis Resources: National Suicide Prevention Lifeline (988)",
                 "Immediate Action: Contact emergency services",
-                "Safety Protocol: Do not leave person alone"
+                "Safety Protocol: Do not leave person alone",
+                "Clinical Focus: Assess plan, means, timeframe"
             ]
         elif risk_level == "high":
             return [
                 "Warning Signs: Expressions of hopelessness and specific plans",
                 "Intervention: Professional mental health assessment needed",
-                "Resources: Crisis text line (text HOME to 741741)"
+                "Resources: Crisis text line (text HOME to 741741)",
+                "Action: Build a written safety plan"
             ]
         elif risk_level == "medium":
             return [
                 "Risk Factors: Emotional distress and concerning language",
-                "Prevention: Supportive conversation and resource provision"
+                "Prevention: Supportive conversation and resource provision",
+                "Follow-up: Encourage counseling within 24-48 hours"
             ]
         else:
             return ["Preventive Resources: Mental health support information"]
@@ -336,22 +439,37 @@ class SimplifiedSuicideDetectionRAG:
         """Comprehensive suicide risk analysis"""
         # Pattern analysis
         pattern_score, risk_factors = self.analyze_patterns(request.text)
+
+        # Protective signal analysis
+        protective_score, protective_cues = self.analyze_protective_signals(request.text)
         
         # Context analysis
         context_score, contextual_cues = self.analyze_context(request.context_messages)
+        contextual_cues.extend(protective_cues)
         
         # ML classification
         mcp_positive, mcp_confidence = self.mcp_classify(request.text)
+
+        imminent_intent = any('Temporal indicator' in factor for factor in risk_factors) and any(
+            marker in factor for marker in ['Direct threat', 'Method reference'] for factor in risk_factors
+        )
         
         # Determine risk level
-        risk_level = self.determine_risk_level(pattern_score, context_score, mcp_positive, mcp_confidence)
+        risk_level = self.determine_risk_level(
+            pattern_score,
+            context_score,
+            mcp_positive,
+            mcp_confidence,
+            protective_score,
+            imminent_intent,
+        )
         
         # Calculate confidence
-        total_score = pattern_score + context_score
-        confidence = min((total_score / 20) * 0.7 + (mcp_confidence * 0.3), 1.0)
+        total_score = max(pattern_score + context_score - min(protective_score, 8), 0)
+        confidence = min((total_score / 20) * 0.65 + (mcp_confidence * 0.35), 1.0)
         
         # Get recommendations
-        recommended_action = self.get_recommended_action(risk_level)
+        recommended_action = self.get_recommended_action(risk_level, confidence, risk_factors, contextual_cues)
         knowledge_matches = self.get_knowledge_matches(risk_level)
         
         return RiskAnalysisResponse(
@@ -475,6 +593,45 @@ def user_to_response(user: User) -> UserResponse:
         is_admin=bool(user.is_admin or is_admin_email(user.email)),
     )
 
+
+def flagged_event_to_response(event: FlaggedEvent) -> FlaggedEventResponse:
+    reviewed_at = int(event.reviewed_at.timestamp() * 1000) if event.reviewed_at else None
+    created_at = int(event.created_at.timestamp() * 1000) if event.created_at else int(datetime.utcnow().timestamp() * 1000)
+    return FlaggedEventResponse(
+        id=str(event.id),
+        type=event.content_type,
+        content=event.content,
+        reason=event.reason,
+        riskLevel=event.risk_level,
+        timestamp=created_at,
+        reviewed=bool(event.reviewed),
+        reviewedAt=reviewed_at,
+        reviewedBy=event.reviewed_by,
+        userId=str(event.user_id),
+        userEmail=event.user_email,
+    )
+
+
+def get_user_from_request(request: Request, db: Session) -> User:
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail='Missing or invalid authorization header',
+        )
+
+    token = auth_header[7:]
+    user_id = verify_access_token(token)
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='User not found')
+    return user
+
+
+def require_admin(user: User) -> None:
+    if not (user.is_admin or is_admin_email(user.email)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Admin access required')
+
 def get_db():
     db = SessionLocal()
     try:
@@ -560,35 +717,65 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
 
 @app.get('/api/auth/me', response_model=UserResponse)
 async def get_me(request: Request, db: Session = Depends(get_db)):
-    auth_header = request.headers.get('Authorization')
-    if not auth_header or not auth_header.startswith('Bearer '):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail='Missing or invalid authorization header',
-        )
-    
-    token = auth_header[7:]
-    user_id = verify_access_token(token)
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='User not found')
+    user = get_user_from_request(request, db)
 
     return user_to_response(user)
 
+
+@app.post('/api/admin/flagged', response_model=FlaggedEventResponse)
+async def create_flagged_event(payload: FlaggedEventCreate, request: Request, db: Session = Depends(get_db)):
+    user = get_user_from_request(request, db)
+
+    event = FlaggedEvent(
+        user_id=user.id,
+        user_email=user.email,
+        conversation_id=payload.conversation_id,
+        content_type=(payload.type or 'chat').strip().lower() or 'chat',
+        content=payload.content,
+        reason=payload.reason,
+        risk_level=(payload.risk_level or 'low').strip().lower() or 'low',
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return flagged_event_to_response(event)
+
+
+@app.get('/api/admin/flagged', response_model=List[FlaggedEventResponse])
+async def list_flagged_events(request: Request, db: Session = Depends(get_db)):
+    user = get_user_from_request(request, db)
+    require_admin(user)
+
+    events = db.query(FlaggedEvent).order_by(FlaggedEvent.created_at.desc()).limit(500).all()
+    return [flagged_event_to_response(event) for event in events]
+
+
+@app.patch('/api/admin/flagged/{event_id}', response_model=FlaggedEventResponse)
+async def review_flagged_event(event_id: str, payload: FlaggedEventReview, request: Request, db: Session = Depends(get_db)):
+    user = get_user_from_request(request, db)
+    require_admin(user)
+
+    try:
+        numeric_event_id = int(event_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid flagged event id')
+
+    event = db.query(FlaggedEvent).filter(FlaggedEvent.id == numeric_event_id).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Flagged event not found')
+
+    event.reviewed = bool(payload.reviewed)
+    event.reviewed_at = datetime.utcnow() if event.reviewed else None
+    event.reviewed_by = payload.reviewed_by or user.email
+
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return flagged_event_to_response(event)
+
 @app.post('/api/chat', response_model=ChatResponse)
 async def chat(request: Request, payload: ChatRequest, db: Session = Depends(get_db)):
-    auth_header = request.headers.get('Authorization')
-    if not auth_header or not auth_header.startswith('Bearer '):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail='Missing or invalid authorization header',
-        )
-    
-    token = auth_header[7:]
-    user_id = verify_access_token(token)
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='User not found')
+    user = get_user_from_request(request, db)
 
     if not OPENROUTER_API_KEY:
         raise HTTPException(

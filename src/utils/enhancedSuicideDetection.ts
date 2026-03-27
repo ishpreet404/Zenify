@@ -1,5 +1,5 @@
 import { checkContent } from './contentMonitor';
-import { getApiBaseUrl, apiFetch } from './api';
+import { apiFetch } from './api';
 
 // Enhanced RAG-based suicide detection with improved context awareness
 export interface SuicideRiskAnalysis {
@@ -21,6 +21,16 @@ interface ConversationContext {
   }>;
   userId: string;
   conversationId: string;
+}
+
+interface BackendRiskAssessment {
+  risk_level: 'low' | 'medium' | 'high' | 'critical';
+  confidence: number;
+  risk_factors: string[];
+  contextual_cues: string[];
+  mcp_classification: boolean;
+  recommended_action: string;
+  flagged: boolean;
 }
 
 // Enhanced suicide-related phrases with context patterns
@@ -173,46 +183,56 @@ class EnhancedSuicideDetector {
     return { score, contextualCues };
   }
 
-  private async callMCPClassifier(text: string): Promise<boolean> {
+  private async callBackendRiskAssessment(
+    text: string,
+    context?: ConversationContext
+  ): Promise<BackendRiskAssessment | null> {
     try {
       const response = await apiFetch('/analyze_suicide_risk', {
         method: 'POST',
         auth: true,
         body: JSON.stringify({ 
           text,
-          conversation_id: 'current',
-          user_id: 'current-user',
-          context_messages: []
+          conversation_id: context?.conversationId || 'current',
+          user_id: context?.userId || 'current-user',
+          context_messages: context?.messages || []
         }),
       });
 
       if (response.ok) {
-        const result = await response.json();
-        return result.mcp_classification || false;
+        return (await response.json()) as BackendRiskAssessment;
       }
     } catch {
       console.warn('Enhanced RAG API unavailable, using fallback detection');
     }
-    return false;
+    return null;
   }
 
-  private determineRiskLevel(score: number, mcpPositive: boolean): 'low' | 'medium' | 'high' | 'critical' {
+  private determineRiskLevel(
+    score: number,
+    mcpPositive: boolean,
+    backendRiskLevel?: 'low' | 'medium' | 'high' | 'critical'
+  ): 'low' | 'medium' | 'high' | 'critical' {
+    if (backendRiskLevel === 'critical') return 'critical';
+    if (backendRiskLevel === 'high' && score >= 8) return 'high';
     if (score >= 15 || mcpPositive) return 'critical';
     if (score >= 10) return 'high';
     if (score >= 5) return 'medium';
+    if (backendRiskLevel === 'high') return 'medium';
+    if (backendRiskLevel === 'medium') return 'medium';
     return 'low';
   }
 
-  private getRecommendedAction(riskLevel: string): string {
+  private getRecommendedAction(riskLevel: string, confidence: number): string {
     switch (riskLevel) {
       case 'critical':
-        return 'IMMEDIATE INTERVENTION REQUIRED: Contact emergency services (911) or crisis hotline (988). Do not leave person alone.';
+        return `Critical risk detected (confidence ${Math.round(confidence * 100)}%). Stay with the person, remove immediate means if possible, and contact emergency support now (988/911 in US).`;
       case 'high':
-        return 'URGENT: Contact mental health professional immediately. Consider safety planning and crisis resources.';
+        return `High risk detected (confidence ${Math.round(confidence * 100)}%). Encourage immediate crisis support and complete a brief safety plan with trusted contacts.`;
       case 'medium':
-        return 'MONITOR CLOSELY: Schedule mental health assessment. Provide crisis resources and support.';
+        return `Medium risk detected (confidence ${Math.round(confidence * 100)}%). Continue supportive dialogue, assess escalation, and suggest professional follow-up within 24-48 hours.`;
       case 'low':
-        return 'PREVENTIVE: Continue supportive conversation. Monitor for changes in mood or expression.';
+        return `Low risk detected (confidence ${Math.round(confidence * 100)}%). Continue supportive conversation and monitor for changes.`;
       default:
         return 'Continue monitoring and provide supportive resources.';
     }
@@ -229,30 +249,43 @@ class EnhancedSuicideDetector {
     const patternAnalysis = this.calculatePatternScore(text);
     const contextualAnalysis = this.analyzeContextualRisk(text, context);
     
-    // MCP classifier integration
-    const mcpClassification = await this.callMCPClassifier(text);
+    // Backend classifier + context-aware risk assessment
+    const backendAssessment = await this.callBackendRiskAssessment(text, context);
+    const mcpClassification = backendAssessment?.mcp_classification || false;
     
     // Calculate total risk score
     const totalScore = patternAnalysis.score + contextualAnalysis.score;
-    const riskLevel = this.determineRiskLevel(totalScore, mcpClassification);
+    const riskLevel = this.determineRiskLevel(totalScore, mcpClassification, backendAssessment?.risk_level);
     
     // Calculate confidence based on multiple factors
-    const confidence = Math.min(
+    const localConfidence = Math.min(
       (totalScore / 20) * 0.7 + 
       (mcpClassification ? 0.3 : 0) + 
       (basicCheck.flagged ? 0.2 : 0), 
       1.0
     );
+    const confidence = backendAssessment
+      ? Math.min((localConfidence * 0.45) + (backendAssessment.confidence * 0.55), 1.0)
+      : localConfidence;
+
+    const combinedRiskFactors = Array.from(
+      new Set([...(backendAssessment?.risk_factors || []), ...patternAnalysis.matchedPatterns])
+    );
+    const combinedContextualCues = Array.from(
+      new Set([...(backendAssessment?.contextual_cues || []), ...contextualAnalysis.contextualCues])
+    );
+    const recommendedAction =
+      backendAssessment?.recommended_action || this.getRecommendedAction(riskLevel, confidence);
 
     const analysis: SuicideRiskAnalysis = {
       riskLevel,
       confidence,
-      riskFactors: patternAnalysis.matchedPatterns,
-      contextualCues: contextualAnalysis.contextualCues,
+      riskFactors: combinedRiskFactors,
+      contextualCues: combinedContextualCues,
       mcpClassification,
-      recommendedAction: this.getRecommendedAction(riskLevel),
-      flagged: riskLevel !== 'low' || basicCheck.flagged,
-      reason: basicCheck.reason || 'Enhanced suicide risk patterns detected'
+      recommendedAction,
+      flagged: (backendAssessment?.flagged ?? false) || riskLevel !== 'low' || basicCheck.flagged,
+      reason: basicCheck.reason || 'Enhanced suicide risk signals detected'
     };
 
     // Log high-risk cases for admin review
